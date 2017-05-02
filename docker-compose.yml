@@ -1,0 +1,108 @@
+version: '2'
+services: 
+  haproxy:
+    build: 
+        context: ./haproxy
+    hostname: haproxy
+    links:
+      - rabbit1
+      - rabbit2
+    ports:
+      - "1936:1936"
+      - "0.0.0.0:15671:15671"
+      - "1883:1883"
+      - "5671:5671"
+
+  rabbit1:
+    build: 
+          context: ./rabbitmq
+    hostname: rabbit1
+    environment:
+      - ERLANG_COOKIE=abcdefg
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  rabbit2:
+    build: 
+          context: ./rabbitmq
+    hostname: rabbit2
+    links:
+      - rabbit1
+    environment:
+      - ERLANG_COOKIE=abcdefg
+      - CLUSTER_WITH=rabbit1
+      - ENABLE_RAM=true
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+
+  consulserver:
+    image: gliderlabs/consul-server:latest
+    ports:
+    - "8300"
+    - "8301"
+    - "8400"
+    - "0.0.0.0:8500:8500"
+    - "53"
+    command: -data-dir /tmp/consul -bootstrap -client 0.0.0.0
+
+  mongodb:
+      image: mongo:latest
+      ports:
+      - 0.0.0.0:27017:27017
+      - 7946/tcp
+      - 7946/udp
+
+  # redis:
+  #     environment:
+  #     - DOCKER_FIX_ISSUE_14203=true
+  #     #- EYEOS_RUN_SERVER_RESOLV=/open365/resolv.conf
+  #     image: redis:latest
+  #     ports:
+  #     - 7946/tcp
+  #     - 7946/udp
+  #     - 0.0.0.0:6379:6379
+  redismaster:
+    image: redis:3
+    ports:
+      - 7946/tcp
+      - 7946/udp
+      - 0.0.0.0:6379:6379
+
+  redisslave:
+    image: redis:3
+    command: redis-server --slaveof redismaster 6379
+    links:
+      - redismaster
+
+  redissentinel:
+    build: 
+      context: ./sentinel
+    environment:
+      - SENTINEL_DOWN_AFTER=5000
+      - SENTINEL_FAILOVER=5000    
+    links:
+      - redismaster
+      - redisslave
+
+  elasticsearch:
+      image: elasticsearch:latest
+      ports:
+        - 9200:9200
+      environment:
+        ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+      command: elasticsearch
+
+  registrator:
+    image: gliderlabs/registrator:master
+    hostname: registrator
+    links:
+    -  consulserver:consul
+    volumes:
+    -  "/var/run//docker.sock:/tmp/docker.sock"
+    command: -internal consul://consul:8500
+    
+  squid:
+    image: sameersbn/squid
+    hostname: squid
